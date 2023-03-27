@@ -1,0 +1,227 @@
+_PROCESSING_ASM
+
+	.if defined (_PROCESSING_ASM)
+_BLOCK_SIZE .equ 0x10
+_INPUT_NUM_CHANNELS .equ 2
+_L .equ 0
+_R .equ 1
+_C .equ 2
+_DELAY .equ 1
+_delayBuff_struct .equ 0
+_bufferLength_struct .equ 1
+_writeIndex_struct .equ 2
+_readIndex_struct .equ 3
+_delay_struct .equ 4
+
+	.public _processing
+	#.public _delay
+	#.extern _delayBuff
+	#.extern _delBuff
+	.extern _inputGain
+	.extern _headroomGain
+	.extern _afterDelayGain
+	.extern _limiterThreshold
+	
+	.code_ovly
+	
+	# Prema pozivnoj konvenciji:
+	# i0 + (_L * _BLOCK_SIZE) - input levi
+	# i0 + (_R * _BLOCK_SIZE) - input desni
+	# i1 + (_L * _BLOCK_SIZE) - output levi
+	# i1 + (_R * _BLOCK_SIZE) - output desni
+	# i1 + (_C * _BLOCK_SIZE) - output centralni
+#_delay_init:
+//void delay_init(DelayBuffer* delBuff, DSPfract* buffer)
+//{
+//	DSPint i;
+//	for (i = 0; i < bufLen; i++)
+//	{
+//		*buffer = FRACT_NUM(0.0);
+//		buffer++;
+//	}
+//	buffer -= bufLen;
+//	delBuff->delayBuff = buffer;
+//	delBuff->bufferLength = bufLen;
+//	delBuff->writeIndex = bufLen - 1;
+//	delBuff->delay = delay;
+//	delBuff->readIndex = bufLen - 1 - delay;
+//};
+	#i0 = delBuff
+	#i1 = buffer
+#	x0 = (0x0000)
+#	do(_BLOCK_SIZE),>loop
+#		ymem[i1] = x0
+#%loop:	i1 += 1
+#	i1 = (_delBuff)
+#	i4 = i0 + (_delayBuff_struct)
+#	x0 = ymem[i1]
+#	ymem[i4] = x0
+#	x0 = (_BLOCK_SIZE)
+#	i4 += 1
+#	nop
+#	ymem[i4] = x0
+#	i4 = i0 + (_writeIndex_struct)
+#	x0 = 0xF
+#	nop
+#	ymem[i4] = x0
+#	i4 = i0 + (_delay_struct)
+#	nop
+#	ymem[i4] = 0x1
+#	nop
+#	i4 = i0 + (_readIndex_struct)
+#	nop
+#	ymem[i4] = 0xE
+#	ret
+_processing:
+	do(_BLOCK_SIZE),>loop
+		x1 = xmem[_inputGain]
+		
+		#L
+		i4 = i0 + (_L * _BLOCK_SIZE)	#Pokazivac na levi kanal
+		nop 	
+		x0 = ymem[i4]					#vrednost levog kanala na n-tom semplu
+		nop
+		a0 = x0 * x1					#vrednost levog kanala na n samplu * inputGain
+		nop
+		a0 = a0 >> 1					#shiftujemo zbog sabiranja
+		nop
+		ymem[i4] = a0					#smestamo obradjenu vrednost na adresu ulaznog kanal (za levi kanal)
+		
+		#R
+		i4 = i0 + (_R * _BLOCK_SIZE)	#Pokazivac na desni kanal
+		nop								
+		x0 = ymem[i4]					#vrednost desnog kanala na n-tom semplu		
+		nop
+		a0 = x0 * x1					#vrednost desnog kanala * inputGain
+		nop
+		a0 = a0 >> 1					#shiftujemo zbog sabiranja
+		nop
+		ymem[i4] = a0					#smestamo obradjenu vrednost na adresu ulaznog kanala
+		
+		#C
+		x1 = xmem[_headroomGain]		#uzimamo headroom gain
+		
+		i4 = i0 + (_L * _BLOCK_SIZE)	#pokazivac na levi kanal
+		nop
+		a1 = ymem[i4]					#ucitavamo vrednost iz levog kanala
+		nop
+		a0 = a0 + a1					#sabiramo ulazne vrednosti levog i desnog kanal
+		i4 = i1 + (_C * _BLOCK_SIZE)	#pokazivac na izlazni centralni kanal
+		
+		x0 = a0							#x0=centralni sabrani kanal
+		nop
+		a0 = x0 * x1					#mnozimo sa headroom gain
+		nop
+		ymem[i4] = a0					#upisujemo na adresu centralnog kanala
+		
+		#L OUT
+		x1 = xmem[_afterDelayGain]		#afterDelayGain
+		i4 = i0 + (_L * _BLOCK_SIZE)
+		nop
+		x0 = ymem[i4]					#ucitavamo obradjen zvuk
+		nop
+		a0 = x0 * x1					#afterDelayGain
+		i4 = i1 + (_L * _BLOCK_SIZE)	#pokazivac na output L kanal
+		nop
+		ymem[i4] = a0					#upisujemo obradjen signal u output	
+		
+		#R OUT
+		i4 = i0 + (_R * _BLOCK_SIZE)	#pokazivac na obradjeni desni kanal
+		nop
+		x0 = ymem[i4]					#dodela vrednosti
+		nop
+		i4 = i1 + (_R * _BLOCK_SIZE)	#pokazivac na desni output kanal
+		nop
+		ymem[i4] = x0					#upisivanje na output desni kanal
+		
+		#Rescale C Out
+		i4 = i1 + (_C * _BLOCK_SIZE)
+		nop
+		a0 = ymem[i4]
+		nop
+		a0 = a0 << 1
+		
+		#Saturate C Out
+		call X_S_saturation
+		
+		#Rescale L out
+		i4 = i1 + (_L * _BLOCK_SIZE)
+		nop
+		a0 = ymem[i4]
+		nop
+		a0 = a0 << 1
+		
+		#Saturate L Out
+		call X_S_saturation
+		
+		#Rescale R out
+		i4 = i1 + (_R * _BLOCK_SIZE)
+		nop
+		a0 = ymem[i4]
+		nop
+		a0 = a0 << 1
+		
+		#Saturate L Out
+		call X_S_saturation
+		
+		i0+=1
+%loop:	i1+=1
+	ret
+//_delay:
+	//void delay(__memY DSPfract* inputBuffer,__memY DSPfract* outputBuffer, DSPint inputLength,__memY DelayBuffer* delBuff)
+//{
+	//DSPint i;
+	//DSPint k;
+
+	//__memY DSPfract* DB;
+	//__memY DSPfract* RI;
+
+	//for (i = 0; i < inputLength; i++)
+	//{
+		//DB = delBuff->delayBuff;
+		//for (k = 0; k < delBuff->writeIndex; k++)
+		//{
+			//DB++;
+		//}
+		// *DB = *inputBuffer;
+
+		//delBuff->writeIndex = saturation((delBuff->writeIndex + 1) & (delBuff->bufferLength - 1));
+
+		// *outputBuffer = *inputBuffer;
+
+		//RI = delBuff->delayBuff;
+
+		//for (k = 0; k < delBuff->readIndex; k++)
+		//{
+			//RI++;
+		//}
+
+		// *outputBuffer = *outputBuffer + *RI;
+
+		//delBuff->readIndex = saturation((delBuff->readIndex + 1) & (delBuff->bufferLength - 1));
+
+		//outputBuffer++;
+		//inputBuffer++;
+	//}
+	//i5 = i4 + (_delayBuff_struct)
+	
+	//do(_BLOCK_SIZE),>loop
+		
+//%loop:
+	//ret
+X_S_saturation:
+	b0 = xmem[_limiterThreshold]
+	a0 - b0
+	if(a<0)	jmp>checkFmin
+		a0 = b0
+		jmp>saturated
+%checkFmin:
+	b0 = -b0
+	a0 - b0
+	if(a>=0) jmp>saturated
+		a0 = b0
+		jmp>saturated
+%saturated:
+	ymem[i4] = a0
+	ret
+	.endif
